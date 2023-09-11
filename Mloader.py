@@ -1,4 +1,16 @@
 #!/usr/bin/env python
+########################Disclaimer:########################
+#Mloader is provided for educational and personal use only. 
+#Downloading copyrighted content without permission may be 
+#illegal in your jurisdiction.The authors do not encourage 
+#or condone using this software for illegal activity. Users 
+#accept full responsibility for determining whether their use
+#of this software complies with applicable laws in their region.
+#The authors provide this software as-is without warranty and 
+#accept no liability for damages resulting from its use. 
+#By using this software, you agree to these terms.
+##########################################################
+
 import os
 import subprocess
 from time import sleep
