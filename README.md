@@ -23,9 +23,13 @@ Mloader requires the following Python packages:
 Install them via pip:
 
 ```
-pip install pytube moviepy ffmpeg-python
+pip install pytube moviepy ffmpeg-python ffmpeg
 ```
 
+Note, you may need to install ffmpeg on linux:
+```
+sudo apt install ffmpeg
+```
 ## Usage
 
 1. Set the `downloaded_songs_folder` and `converted_songs_folder` variables to the desired download locations.
