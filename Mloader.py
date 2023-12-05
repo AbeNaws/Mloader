@@ -11,11 +11,15 @@
 #By using this software, you agree to these terms.
 ##########################################################
 
+#!/usr/bin/env python
 import os
+import sys
+import requests
 import subprocess
 from time import sleep
-from pytube import Playlist, YouTube
 from moviepy.editor import *
+from urllib.parse import urlparse
+from pytube import Playlist, YouTube
 
 downloaded_songs_folder = '' #ie. /home/user/Music/temp"
 converted_songs_folder = '' #ie. /home/user/Music/Mloader"
@@ -57,6 +61,10 @@ def process_video(video, downloaded_songs_folder, converted_songs_folder):
         if file.endswith(".mp4"):
             video_path = os.path.join(downloaded_songs_folder, file)
             mp3_path = os.path.join(converted_songs_folder, f"{file[:-4]}.mp3")
+            song_version = 0
+            while os.path.exists(mp3_path):
+                song_version += 1
+                mp3_path = os.path.join(converted_songs_folder, f"{file[:-4]} (" + str(song_version) + ").mp3")
             try:
                 video = VideoFileClip(video_path)
                 subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "panic",
@@ -89,13 +97,32 @@ def process_video(video, downloaded_songs_folder, converted_songs_folder):
             # Remove the downloaded thumbnail
             os.remove(thumbnail_path)
 
+# Check if link is valid/available
+def is_youtube_url(url):
+    parsed_url = urlparse(url)
+    return parsed_url.netloc.endswith('youtube.com')
+
+def is_video_available(video_url):
+    r = requests.get(video_url)
+    return "Video unavailable" not in r.text
+
 # Check that the file destinations have been set
 if downloaded_songs_folder == '' or converted_songs_folder == '':
     print('Add locations for folders')
     quit()
 
 # Url input
-url = input('Url: ')
+try:
+    url = sys.argv[1]
+except:
+    url = input('Url: ')
+
+#Try to find/validate video
+if is_youtube_url(url) and is_video_available(url):
+    print("Link Valid!")
+else:
+    print("Invalid or unavailable link")
+    quit
 
 # Determine if playlist or single song
 if 'playlist' in url or 'list' in url:
