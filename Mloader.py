@@ -20,7 +20,7 @@ from mutagen.id3 import ID3, APIC
 from urllib.request import urlopen
 
 # Set the download folder
-DOWNLOAD_FOLDER = '/home/lincoln/Music/Mloader'
+DOWNLOAD_FOLDER = '/home/user/Music/Mloader'
 
 def preview_downloads(url):
     ydl_opts = {
