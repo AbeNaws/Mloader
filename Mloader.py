@@ -11,132 +11,132 @@
 #By using this software, you agree to these terms.
 ##########################################################
 
-#!/usr/bin/env python
-import os
 import sys
-import requests
-import subprocess
-from time import sleep
-from moviepy.editor import *
-from urllib.parse import urlparse
-from pytube import Playlist, YouTube
+import os
+import yt_dlp
+import validators
+from mutagen.easyid3 import EasyID3
+from mutagen.id3 import ID3, APIC
+from urllib.request import urlopen
 
-downloaded_songs_folder = '' #ie. /home/user/Music/temp"
-converted_songs_folder = '' #ie. /home/user/Music/Mloader"
+# Set the download folder
+DOWNLOAD_FOLDER = '/home/lincoln/Music/Mloader'
 
-# If needed folders don't exist, create them
-def create_folders():
-    if not os.path.exists(downloaded_songs_folder):
-        os.makedirs(downloaded_songs_folder)
-    if not os.path.exists(converted_songs_folder):
-        os.makedirs(converted_songs_folder)
+def preview_downloads(url):
+    ydl_opts = {
+        'quiet': True,
+        'extract_flat': 'in_playlist',
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+            
+            if 'entries' in info:
+                # Playlist
+                print("Songs to be downloaded:")
+                for idx, entry in enumerate(info['entries'], 1):
+                    print(f"{idx}. {entry['title']}")
+            else:
+                # Single video
+                print("Song to be downloaded:")
+                print(f"1. {info['title']}")
+            
+            print()  # Add a blank line after the list
+            return info
+        except Exception as e:
+            print(f"Error previewing downloads: {str(e)}")
+            sys.exit(1)
 
-# Display songs in playlist
-def display_playlist(playlist):
-    print(f'Number Of Songs In playlist: {len(playlist.video_urls)}')
-    print('-' * len(playlist.title))
-    print(playlist.title)
-    print('-' * len(playlist.title))
-    for video in playlist.video_urls:
-        yt = YouTube(video)
-        print(yt.title)
-    print()
-    sleep(2)
+def get_safe_filename(base_filename, extension):
+    counter = 1
+    new_filename = f"{base_filename}.{extension}"
+    while os.path.exists(os.path.join(DOWNLOAD_FOLDER, new_filename)):
+        if counter == 1:
+            return new_filename  # Return the original filename for the first occurrence
+        new_filename = f"{base_filename} ({counter}).{extension}"
+        counter += 1
+    return new_filename
 
-# Display song
-def display_single_video(yt):
-    print('-' * len(yt.title) + '------')
-    print(f'Song: {yt.title}')
-    print('-' * len(yt.title) + '------')
+def download_and_convert(info):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
+        'quiet': True,
+        'writethumbnail': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }, {
+            'key': 'EmbedThumbnail',
+        }],
+    }
 
-
-def process_video(video, downloaded_songs_folder, converted_songs_folder):
-    # Download the video
-    print(f'Downloading: {video.title}')
-    audio_stream = video.streams.filter(only_audio=True).first()
-    audio_stream.download(output_path=downloaded_songs_folder)
-
-    # Convert the downloaded video to MP3 and add metadata
-    for file in os.listdir(downloaded_songs_folder):
-        if file.endswith(".mp4"):
-            video_path = os.path.join(downloaded_songs_folder, file)
-            mp3_path = os.path.join(converted_songs_folder, f"{file[:-4]}.mp3")
-            song_version = 0
-            while os.path.exists(mp3_path):
-                song_version += 1
-                mp3_path = os.path.join(converted_songs_folder, f"{file[:-4]} (" + str(song_version) + ").mp3")
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        if 'entries' in info:
+            # Playlist
+            for entry in info['entries']:
+                try:
+                    print(f"Downloading: {entry['title']}")
+                    ydl.download([entry['url']])
+                    process_file(entry)
+                except Exception as e:
+                    print(f"Error downloading {entry['title']}: {str(e)}")
+        else:
+            # Single video
             try:
-                video = VideoFileClip(video_path)
-                subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "panic",
-                                "-i", video_path, "-vn", "-acodec", "copy", mp3_path], check=True)
-                os.remove(video_path)
-            except KeyError:
-                audio = AudioFileClip(video_path)
-                audio.write_audiofile(mp3_path, verbose=False)
-                os.remove(video_path)
+                print(f"Downloading: {info['title']}")
+                ydl.download([info['webpage_url']])
+                process_file(info)
+            except Exception as e:
+                print(f"Error downloading {info['title']}: {str(e)}")
 
-            # Download the thumbnail
-            thumbnail_url = video.thumbnail_url
-            thumbnail_path = "thumbnail.jpg"
-            subprocess.run(["wget", "-O", thumbnail_path, thumbnail_url],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def process_file(info):
+    base_filename = info['title']
+    safe_filename = get_safe_filename(base_filename, 'mp3')
+    filename = os.path.join(DOWNLOAD_FOLDER, safe_filename)
+    
+    # Rename the file if it's different from the original filename
+    original_filename = os.path.join(DOWNLOAD_FOLDER, f"{base_filename}.mp3")
+    if original_filename != filename and os.path.exists(original_filename):
+        os.rename(original_filename, filename)
 
-            # Add metadata and thumbnail to the MP3 file
-            temp_path = os.path.join(
-                converted_songs_folder, f"temp_{file[:-4]}.mp3")
-            subprocess.run([
-                "ffmpeg", "-hide_banner", "-loglevel", "panic", "-i", mp3_path, "-i", thumbnail_path, "-c", "copy",
-                "-metadata", f"title={video.title}", "-metadata", f"artist={video.author}",
-                "-map", "0", "-map", "1", "-id3v2_version", "3", temp_path
-            ], check=True)
+    # Add metadata
+    try:
+        audio = EasyID3(filename)
+        audio['title'] = info['title']
+        audio['artist'] = info['uploader']
+        audio['album'] = info.get('album', 'Unknown Album')
+        audio.save()
 
-            # Replace the original MP3 file with the updated one
-            os.remove(mp3_path)
-            os.rename(temp_path, mp3_path)
+    except Exception as e:
+        print(f"Error processing metadata for {info['title']}: {str(e)}")
 
-            # Remove the downloaded thumbnail
-            os.remove(thumbnail_path)
+def is_valid_url(url):
+    return validators.url(url)
 
-# Check if link is valid/available
-def is_youtube_url(url):
-    parsed_url = urlparse(url)
-    return parsed_url.netloc.endswith('youtube.com')
+def main():
+    # Create the download folder if it doesn't exist
+    os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-def is_video_available(video_url):
-    r = requests.get(video_url)
-    return "Video unavailable" not in r.text
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        url = input("Enter the URL of the song or playlist: ")
 
-# Check that the file destinations have been set
-if downloaded_songs_folder == '' or converted_songs_folder == '':
-    print('Add locations for folders')
-    quit()
+    if not is_valid_url(url):
+        print("Invalid URL. Please provide a valid URL.")
+        return
 
-# Url input
-try:
-    url = sys.argv[1]
-except:
-    url = input('Url: ')
+    info = preview_downloads(url)
+    if info:
+        download_and_convert(info)
 
-#Try to find/validate video
-if is_youtube_url(url) and is_video_available(url):
-    print("Link Valid!")
-else:
-    print("Invalid or unavailable link")
-    quit
-
-# Determine if playlist or single song
-if 'playlist' in url or 'list' in url:
-    playlist = Playlist(url)
-    display_playlist(playlist)
-    create_folders()
-    for video in playlist.videos:
-        process_video(video, downloaded_songs_folder, converted_songs_folder)
-else:
-    yt = YouTube(url)
-    display_single_video(yt)
-    create_folders()
-    process_video(yt, downloaded_songs_folder, converted_songs_folder)
-
-# Remove temporary folder
-if os.path.exists(downloaded_songs_folder):
-    os.rmdir(downloaded_songs_folder)
+if __name__ == "__main__":
+    main()
