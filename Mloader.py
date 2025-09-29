@@ -1,72 +1,69 @@
-#!/usr/bin/env python
-########################Disclaimer:########################
-#Mloader is provided for educational and personal use only. 
-#Downloading copyrighted content without permission may be 
-#illegal in your jurisdiction.The authors do not encourage 
-#or condone using this software for illegal activity. Users 
-#accept full responsibility for determining whether their use
-#of this software complies with applicable laws in their region.
-#The authors provide this software as-is without warranty and 
-#accept no liability for damages resulting from its use. 
-#By using this software, you agree to these terms.
-##########################################################
-
+#!/usr/bin/env python3
 import sys
 import os
 import yt_dlp
 import validators
-from mutagen.easyid3 import EasyID3
-from mutagen.id3 import ID3, APIC
+import re
+import argparse
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, TDRC
 from urllib.request import urlopen
 
-# Set the download folder
-DOWNLOAD_FOLDER = '/home/user/Music/Mloader'
+DEFAULT_DOWNLOAD_FOLDER = os.path.join(os.path.expanduser('~'), 'Music', 'Mloader')
+
+def sanitize_filename(filename):
+    """Removes invalid characters from a filename."""
+    return re.sub(r'[\\/*?:"<>|]',"", filename)
+
+def get_safe_filename(download_folder, base_filename, extension):
+    """Generates a safe, unique filename, handling existing files."""
+    sanitized_base = sanitize_filename(base_filename)
+    new_filename = f"{sanitized_base}.{extension}"
+    counter = 1
+    while os.path.exists(os.path.join(download_folder, new_filename)):
+        new_filename = f"{sanitized_base} ({counter}).{extension}"
+        counter += 1
+    return new_filename
 
 def preview_downloads(url):
+    """Previews the songs to be downloaded from a given URL."""
     ydl_opts = {
         'quiet': True,
         'extract_flat': 'in_playlist',
     }
-    
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
-            
             if 'entries' in info:
-                # Playlist
                 print("Songs to be downloaded:")
                 for idx, entry in enumerate(info['entries'], 1):
                     print(f"{idx}. {entry['title']}")
             else:
-                # Single video
                 print("Song to be downloaded:")
                 print(f"1. {info['title']}")
-            
-            print()  # Add a blank line after the list
+            print()
             return info
         except Exception as e:
             print(f"Error previewing downloads: {str(e)}")
             sys.exit(1)
 
-def get_safe_filename(base_filename, extension):
-    counter = 1
-    new_filename = f"{base_filename}.{extension}"
-    while os.path.exists(os.path.join(DOWNLOAD_FOLDER, new_filename)):
-        if counter == 1:
-            return new_filename  # Return the original filename for the first occurrence
-        new_filename = f"{base_filename} ({counter}).{extension}"
-        counter += 1
-    return new_filename
+def download_song(url, download_folder):
+    """Downloads a single song, ensuring a unique filename."""
+    try:
+        with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': False, 'playlist_items': '1'}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if 'entries' in info:
+                info = info['entries'][0]
+    except Exception as e:
+        print(f"Error fetching video info: {str(e)}")
+        return None, None
 
-def download_and_convert(info):
+    safe_mp3_filename = get_safe_filename(download_folder, info['title'], 'mp3')
+    final_path = os.path.join(download_folder, safe_mp3_filename)
+    final_path_without_ext, _ = os.path.splitext(final_path)
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
+        'outtmpl': f'{final_path_without_ext}.%(ext)s',
         'quiet': True,
         'writethumbnail': True,
         'postprocessors': [{
@@ -78,65 +75,74 @@ def download_and_convert(info):
         }],
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        if 'entries' in info:
-            # Playlist
-            for entry in info['entries']:
-                try:
-                    print(f"Downloading: {entry['title']}")
-                    ydl.download([entry['url']])
-                    process_file(entry)
-                except Exception as e:
-                    print(f"Error downloading {entry['title']}: {str(e)}")
-        else:
-            # Single video
-            try:
-                print(f"Downloading: {info['title']}")
-                ydl.download([info['webpage_url']])
-                process_file(info)
-            except Exception as e:
-                print(f"Error downloading {info['title']}: {str(e)}")
-
-def process_file(info):
-    base_filename = info['title']
-    safe_filename = get_safe_filename(base_filename, 'mp3')
-    filename = os.path.join(DOWNLOAD_FOLDER, safe_filename)
-    
-    # Rename the file if it's different from the original filename
-    original_filename = os.path.join(DOWNLOAD_FOLDER, f"{base_filename}.mp3")
-    if original_filename != filename and os.path.exists(original_filename):
-        os.rename(original_filename, filename)
-
-    # Add metadata
     try:
-        audio = EasyID3(filename)
-        audio['title'] = info['title']
-        audio['artist'] = info['uploader']
-        audio['album'] = info.get('album', 'Unknown Album')
-        audio.save()
-
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+            return info, final_path
     except Exception as e:
-        print(f"Error processing metadata for {info['title']}: {str(e)}")
+        print(f"Error during download for {info.get('title', 'Unknown Title')}: {str(e)}")
+        return None, None
 
-def is_valid_url(url):
-    return validators.url(url)
+def process_metadata(filename, info):
+    """Writes comprehensive ID3 tags to the MP3 file."""
+    try:
+        audio = ID3(filename)
+        audio['TIT2'] = TIT2(encoding=3, text=info.get('title', 'Unknown Title'))
+        audio['TPE1'] = TPE1(encoding=3, text=info.get('uploader', 'Unknown Artist'))
+        audio['TALB'] = TALB(encoding=3, text=info.get('album', info.get('playlist_title', 'Unknown Album')))
+
+        if info.get('upload_date'):
+            audio['TDRC'] = TDRC(encoding=3, text=info['upload_date'][:4])
+
+        if 'thumbnail' in info and not audio.getall('APIC'):
+            with urlopen(info['thumbnail']) as art:
+                audio['APIC'] = APIC(
+                    encoding=3,
+                    mime='image/jpeg',
+                    type=3,
+                    desc='Cover',
+                    data=art.read()
+                )
+        audio.save(v2_version=3)
+    except Exception as e:
+        print(f"Error processing metadata for {info.get('title', 'Unknown Title')}: {str(e)}")
 
 def main():
-    # Create the download folder if it doesn't exist
-    os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Download audio from YouTube videos and playlists.")
+    parser.add_argument('url', nargs='?', default=None, help="The URL of the video or playlist.")
+    parser.add_argument('-o', '--output', default=DEFAULT_DOWNLOAD_FOLDER, help=f"The folder to download songs to. Defaults to {DEFAULT_DOWNLOAD_FOLDER}")
+    args = parser.parse_args()
 
-    if len(sys.argv) > 1:
-        url = sys.argv[1]
-    else:
+    download_folder = args.output
+    os.makedirs(download_folder, exist_ok=True)
+
+    url = args.url
+    if not url:
         url = input("Enter the URL of the song or playlist: ")
 
-    if not is_valid_url(url):
+    if not validators.url(url):
         print("Invalid URL. Please provide a valid URL.")
         return
 
-    info = preview_downloads(url)
-    if info:
-        download_and_convert(info)
+    playlist_info = preview_downloads(url)
+    if not playlist_info:
+        return
+
+    if 'entries' in playlist_info:
+        total_tracks = len(playlist_info['entries'])
+        for idx, entry in enumerate(playlist_info['entries'], 1):
+            print(f"Downloading ({idx}/{total_tracks}): {entry['title']}")
+            song_info, song_path = download_song(entry['url'], download_folder)
+            if song_info and song_path:
+                song_info['playlist_title'] = playlist_info.get('title')
+                process_metadata(song_path, song_info)
+                print(f"Finished: {os.path.basename(song_path)}")
+    else:
+        print(f"Downloading: {playlist_info['title']}")
+        song_info, song_path = download_song(playlist_info['webpage_url'], download_folder)
+        if song_info and song_path:
+            process_metadata(song_path, song_info)
+            print(f"Finished: {os.path.basename(song_path)}")
 
 if __name__ == "__main__":
     main()
