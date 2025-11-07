@@ -14,11 +14,10 @@ A Python script for downloading YouTube videos/playlists and converting them to 
 
 ## Requirements
 
-```bash
-pip install yt-dlp mutagen validators ffmpeg-python
-```
+- Python 3.9+
+- `yt-dlp`, `mutagen`, `validators`, `ffmpeg-python` (install via `python3 Mloader.py install`)
+- FFmpeg for audio conversion:
 
-FFmpeg is required for audio conversion:
 ```bash
 # Ubuntu/Debian
 sudo apt install ffmpeg
@@ -29,11 +28,16 @@ brew install ffmpeg
 
 ## Usage
 
-1. Set `DOWNLOAD_FOLDER` in the script to your desired music folder
+1. (Optional) Refresh the script and dependencies:
+   ```bash
+   python3 Mloader.py install    # first-time setup; pulls latest script + Python deps
+   python3 Mloader.py update     # later updates; also reminds you about FFmpeg
+   ```
 
-2. Run the script:
+2. Run the downloader:
 ```bash
-python mloader.py [URL]
+python3 Mloader.py [URL]             # default output: ~/Music/Mloader
+python3 Mloader.py [URL] -o /path    # custom download folder
 ```
 Or run without arguments to input URL when prompted.
 

@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 import sys
 import os
-import yt_dlp
-import validators
 import re
 import argparse
+import importlib
+import subprocess
+import yt_dlp
+import validators
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, TDRC
 from urllib.request import urlopen
 
 DEFAULT_DOWNLOAD_FOLDER = os.path.join(os.path.expanduser('~'), 'Music', 'Mloader')
+SCRIPT_SOURCE_URL = "https://raw.githubusercontent.com/AbeNaws/Mloader/main/Mloader.py"
+REQUIRED_PACKAGES = {
+    'yt-dlp': 'yt_dlp',
+    'mutagen': 'mutagen',
+    'validators': 'validators',
+    'ffmpeg-python': 'ffmpeg',
+}
 
 def sanitize_filename(filename):
     """Removes invalid characters from a filename."""
@@ -107,16 +116,102 @@ def process_metadata(filename, info):
     except Exception as e:
         print(f"Error processing metadata for {info.get('title', 'Unknown Title')}: {str(e)}")
 
+def get_script_source_url():
+    """Returns the URL to fetch the latest script, allowing overrides."""
+    return os.environ.get('MLOADER_SOURCE_URL', SCRIPT_SOURCE_URL)
+
+def get_current_script_path():
+    """Determines the absolute path to this script file."""
+    return os.path.realpath(__file__)
+
+def refresh_script_in_place(script_path):
+    """Downloads the latest script and overwrites the currently running file."""
+    source_url = get_script_source_url()
+    print(f"Fetching latest script from {source_url} ...")
+    try:
+        with urlopen(source_url) as response:
+            new_contents = response.read()
+    except Exception as exc:
+        print(f"Failed to download latest script: {exc}")
+        return False
+
+    try:
+        with open(script_path, 'wb') as script_file:
+            script_file.write(new_contents)
+    except OSError as exc:
+        print(f"Failed to write updated script to {script_path}: {exc}")
+        return False
+
+    print(f"Script refreshed at {script_path}")
+    return True
+
+def prompt_and_install_packages(force_refresh=False):
+    """Ensures required packages are installed; optionally forces a full refresh."""
+    missing_packages = []
+    for package_name, module_name in REQUIRED_PACKAGES.items():
+        try:
+            importlib.import_module(module_name)
+        except ImportError:
+            missing_packages.append(package_name)
+
+    if not missing_packages and not force_refresh:
+        print("All required Python packages are already installed.")
+        return True
+
+    if missing_packages:
+        print("Missing Python packages detected: " + ", ".join(missing_packages))
+    else:
+        print("Refreshing required Python packages to ensure latest versions.")
+
+    packages_to_install = list(REQUIRED_PACKAGES.keys()) if force_refresh else missing_packages
+
+    choice = input("Install/upgrade the required packages now? [Y/n]: ").strip().lower()
+    if choice not in ("", "y", "yes"):
+        print("Skipping package installation.")
+        return False
+
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", "-U", *packages_to_install])
+        print("Package installation complete.")
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"Package installation failed: {exc}")
+        return False
+
+def handle_install_or_update(remind_ffmpeg=False, force_package_refresh=False):
+    """Runs the shared install/update workflow."""
+    script_path = get_current_script_path()
+    refreshed = refresh_script_in_place(script_path)
+    if not refreshed:
+        print("Unable to refresh script; aborting.")
+        return
+
+    prompt_and_install_packages(force_refresh=force_package_refresh)
+
+    if remind_ffmpeg:
+        print("Reminder: Install FFmpeg (sudo apt install ffmpeg / brew install ffmpeg) before downloading audio.")
+
 def main():
-    parser = argparse.ArgumentParser(description="Download audio from YouTube videos and playlists.")
-    parser.add_argument('url', nargs='?', default=None, help="The URL of the video or playlist.")
+    parser = argparse.ArgumentParser(
+        description="Download audio from YouTube videos and playlists, or manage installs/updates."
+    )
+    parser.add_argument('target', nargs='?', default=None, help="Video/playlist URL, or the special commands 'install'/'update'.")
     parser.add_argument('-o', '--output', default=DEFAULT_DOWNLOAD_FOLDER, help=f"The folder to download songs to. Defaults to {DEFAULT_DOWNLOAD_FOLDER}")
     args = parser.parse_args()
+
+    if args.target in ('install', 'update'):
+        if args.output != DEFAULT_DOWNLOAD_FOLDER:
+            print("--output has no effect when running install/update commands.")
+        handle_install_or_update(
+            remind_ffmpeg=args.target == 'update',
+            force_package_refresh=args.target == 'update'
+        )
+        return
 
     download_folder = args.output
     os.makedirs(download_folder, exist_ok=True)
 
-    url = args.url
+    url = args.target
     if not url:
         url = input("Enter the URL of the song or playlist: ")
 
